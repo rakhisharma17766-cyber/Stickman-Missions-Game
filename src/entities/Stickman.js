@@ -1,6 +1,8 @@
 /**
  * Stickman.js
- * Player Entity with 3-Stage Katana Combo, Aerial Leaping, Demon Dash, and Health/Upgrades
+ * Core Player Entity for Stickman Demon Hunter
+ * Features Kinematics, Health & Lives Progression, 3-Hit Katana Combos,
+ * Air Acrobatics, Ghost-Trail Dashing, and Instant Resurrections.
  */
 
 import { Physics } from '../engine/Physics';
@@ -9,288 +11,323 @@ import { AudioFX } from '../utils/AudioFX';
 import { PlayerProfile } from '../state/PlayerProfile';
 
 export class Stickman {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
+  constructor(startX = 200, startY = 400) {
+    this.x = startX;
+    this.y = startY;
+    this.startX = startX;
+    this.startY = startY;
+
     this.vx = 0;
     this.vy = 0;
-    this.width = 30;
-    this.height = 58;
-    this.facing = "right"; // "left" | "right"
-    this.isGrounded = false;
-    this.isFlying = false;
+    this.width = 32;
+    this.height = 68;
+
+    // Load dynamic Dojo Upgrades from Profile
+    const profile = PlayerProfile.getProfile();
+    const bladeLevel = profile.upgrades?.bladeDamage || 1;
+    const armorLevel = profile.upgrades?.armor || 1;
+    const agilityLevel = profile.upgrades?.agility || 1;
+
+    // Health & Lives System (Requirement: 3 Lives per battle, respawns with full HP)
+    this.maxLives = 3;
+    this.lives = 3;
+    this.maxHealth = 100 + (armorLevel - 1) * 25;
+    this.health = this.maxHealth;
     this.isDead = false;
 
-    // Upgrades calculation from PlayerProfile
-    const profile = PlayerProfile.getProfile();
-    const hpLevel = profile.upgrades.maxHealth || 1;
-    const dmgLevel = profile.upgrades.bladeDamage || 1;
-    const dashLevel = profile.upgrades.dashEnergy || 1;
-    const critLevel = profile.upgrades.critRate || 1;
+    // Movement & Combat Stats
+    this.moveSpeed = 340 + (agilityLevel - 1) * 20;
+    this.jumpForce = -680;
+    this.baseDamage = 25 + (bladeLevel - 1) * 12;
+    this.critChance = 0.2 + (bladeLevel - 1) * 0.05;
 
-    this.maxHealth = 100 + (hpLevel - 1) * 25;
-    this.health = this.maxHealth;
-    this.baseDamage = 25 * (1 + (dmgLevel - 1) * 0.15);
-    this.critChance = 0.10 + (critLevel - 1) * 0.05;
+    // States: "IDLE" | "RUN" | "JUMP" | "FALL" | "SLASH_1" | "SLASH_2" | "SLASH_3" | "DASH" | "HURT"
+    this.state = "IDLE";
+    this.facing = "right";
+    this.isGrounded = false;
+    this.animTimer = 0;
 
-    // Movement speeds
-    this.moveSpeed = 380;
-    this.jumpForce = -720;
-    
-    // Combat & Combo
+    // Combat Combo System
     this.comboCount = 0;
     this.comboTimer = 0;
-    this.comboMaxWindow = 2.0;
-    this.attackPhase = 1; // 1, 2, 3
-    this.isAttacking = false;
-    this.attackTimer = 0;
+    this.comboMaxWindow = 1.6;
+    this.attackPhase = 0; // 1, 2, 3
     this.attackDuration = 0.22;
-    this.attackHitboxes = [];
+    this.attackTimer = 0;
     this.hasHitThisAttack = false;
 
-    // Dash
-    this.isDashing = false;
+    // Dash Mechanic
     this.dashTimer = 0;
-    this.dashDuration = 0.18;
-    this.dashCooldown = Math.max(0.6, 1.4 - (dashLevel - 1) * 0.18);
-    this.dashCooldownTimer = 0;
-    this.dashSpeed = 950;
-    this.dashTrail = [];
+    this.dashCooldown = 0;
+    this.dashSpeed = 820;
+    this.ghostTrails = [];
 
-    // Invulnerability & Recoil
+    // Respawn / Invulnerability
     this.invulnerableTimer = 0;
-    this.hurtTimer = 0;
-
-    // Visual Animation
-    this.animState = "IDLE";
-    this.animTimer = 0;
+    this.respawnBannerTimer = 0;
+    this.hitStunTimer = 0;
   }
 
-  handleInput(inputState) {
-    if (this.isDead) return;
+  handleInput(input) {
+    if (this.isDead || this.hitStunTimer > 0) return;
 
-    // Left / Right Movement
-    if (!this.isDashing) {
-      if (inputState.left) {
+    // Attack Action
+    if (input.attack && this.attackTimer <= 0 && this.dashTimer <= 0) {
+      this.executeAttack();
+      return;
+    }
+
+    // Dash Action
+    if (input.dash && this.dashCooldown <= 0 && this.attackTimer <= 0) {
+      this.executeDash();
+      return;
+    }
+
+    // Horizontal Movement (Only if not attacking)
+    if (this.attackTimer <= 0 && this.dashTimer <= 0) {
+      if (input.left) {
         this.vx = -this.moveSpeed;
         this.facing = "left";
-      } else if (inputState.right) {
+      } else if (input.right) {
         this.vx = this.moveSpeed;
         this.facing = "right";
+      } else {
+        this.vx = 0;
       }
-    }
 
-    // Jump
-    if (inputState.jump && this.isGrounded && !this.isDashing) {
-      this.vy = this.jumpForce;
-      this.isGrounded = false;
-      AudioFX.playJump();
-      inputState.jump = false; // Consume input trigger
-    }
-
-    // Attack
-    if (inputState.attack && !this.isAttacking && !this.isDashing) {
-      this.executeAttack();
-      inputState.attack = false;
-    }
-
-    // Dash
-    if (inputState.dash && this.dashCooldownTimer <= 0 && !this.isDashing) {
-      this.executeDash();
-      inputState.dash = false;
+      // Jump
+      if (input.jump && this.isGrounded) {
+        this.vy = this.jumpForce;
+        this.isGrounded = false;
+        this.state = "JUMP";
+        AudioFX.playJump();
+      }
     }
   }
 
   executeAttack() {
-    this.isAttacking = true;
-    this.attackTimer = 0;
+    this.attackPhase = (this.attackPhase % 3) + 1;
+    this.attackTimer = this.attackPhase === 3 ? 0.32 : 0.22;
     this.hasHitThisAttack = false;
+    this.state = `SLASH_${this.attackPhase}`;
+    this.animTimer = 0;
 
-    // Progress combo
-    if (this.comboTimer > 0) {
-      this.attackPhase = (this.attackPhase % 3) + 1;
-    } else {
-      this.attackPhase = 1;
-    }
-
-    // Lunge forward slightly during attack
-    const lungeDir = this.facing === "right" ? 1 : -1;
-    this.vx = lungeDir * (this.attackPhase === 3 ? 320 : 180);
+    // Forward combat momentum lunge
+    this.vx = (this.facing === "right" ? 1 : -1) * (140 + this.attackPhase * 70);
 
     AudioFX.playSlash(this.attackPhase);
   }
 
   executeDash() {
-    this.isDashing = true;
-    this.dashTimer = this.dashDuration;
-    this.dashCooldownTimer = this.dashCooldown;
-    this.invulnerableTimer = this.dashDuration + 0.1; // I-frames during dash
-    
-    const dashDir = this.facing === "right" ? 1 : -1;
-    this.vx = dashDir * this.dashSpeed;
-    this.vy = 0; // Level dash
+    this.dashTimer = 0.22;
+    this.dashCooldown = 0.9;
+    this.invulnerableTimer = Math.max(this.invulnerableTimer, 0.25);
+    this.state = "DASH";
+    this.animTimer = 0;
+    this.vx = (this.facing === "right" ? 1 : -1) * this.dashSpeed;
+    this.vy = 0;
 
     AudioFX.playDash();
   }
 
-  update(dt, groundY, particles) {
+  takeDamage(damage, sourceX, uiManager, particleSystem) {
+    if (this.isDead || this.invulnerableTimer > 0) return;
+
+    this.health = Math.max(0, this.health - damage);
+    this.invulnerableTimer = 1.0;
+    this.hitStunTimer = 0.18;
+    this.state = "HURT";
+    this.animTimer = 0;
+
+    // Reset Combo on taking heavy damage
+    this.comboCount = 0;
+
+    // Knockback
+    const knockDir = this.x < sourceX ? -1 : 1;
+    this.vx = knockDir * 280;
+    this.vy = -180;
+
+    // Visual & Audio triggers
+    AudioFX.playPlayerHurt();
+    uiManager?.addFloatingText(this.x, this.y - 60, `-${Math.round(damage)}`, "#f43f5e", 18);
+    uiManager?.triggerScreenShake(8, 0.22);
+    particleSystem?.emitDemonBlood(this.x, this.y - 30, this.facing);
+
+    // Life Lost & Respawn Check
+    if (this.health <= 0) {
+      this.handleLifeLost(uiManager, particleSystem);
+    }
+  }
+
+  handleLifeLost(uiManager, particleSystem) {
+    this.lives--;
+
+    if (this.lives > 0) {
+      // RESPAWN THE PLAYER
+      this.health = this.maxHealth;
+      this.invulnerableTimer = 2.8; // 2.8s Mercy invulnerability
+      this.respawnBannerTimer = 2.0;
+      this.hitStunTimer = 0;
+      this.vx = 0;
+      this.vy = -120;
+      this.state = "IDLE";
+
+      AudioFX.playRespawn();
+      particleSystem?.emitRespawnAura(this.x, this.y - 30);
+      uiManager?.addFloatingText(this.x, this.y - 80, `REVIVED! (${this.lives} LIVES LEFT)`, "#22d3ee", 22);
+      uiManager?.triggerScreenShake(12, 0.35);
+    } else {
+      // PERMANENT DEFEAT
+      this.isDead = true;
+      this.lives = 0;
+      AudioFX.playDefeat();
+      particleSystem?.emitSoulBurst(this.x, this.y - 30);
+      uiManager?.addFloatingText(this.x, this.y - 80, "VESSEL SHATTERED", "#ef4444", 26);
+    }
+  }
+
+  update(dt, groundY, particleSystem) {
+    if (this.isDead) return;
+
     this.animTimer += dt;
 
-    // Update Timers
-    if (this.dashCooldownTimer > 0) {
-      this.dashCooldownTimer -= dt;
-    }
+    // Timers
+    if (this.dashCooldown > 0) this.dashCooldown -= dt;
+    if (this.invulnerableTimer > 0) this.invulnerableTimer -= dt;
+    if (this.respawnBannerTimer > 0) this.respawnBannerTimer -= dt;
+    if (this.hitStunTimer > 0) this.hitStunTimer -= dt;
 
-    if (this.invulnerableTimer > 0) {
-      this.invulnerableTimer -= dt;
-    }
-
-    if (this.hurtTimer > 0) {
-      this.hurtTimer -= dt;
-    }
-
-    // Combo Decay Timer
     if (this.comboTimer > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) {
         this.comboCount = 0;
-        this.attackPhase = 1;
       }
     }
 
-    // Dash State
-    if (this.isDashing) {
+    // Ghost Trails during Dash
+    if (this.dashTimer > 0) {
       this.dashTimer -= dt;
-      // Record shadow trail for neon blur
-      this.dashTrail.push({
+      this.ghostTrails.push({
         x: this.x,
         y: this.y,
         facing: this.facing,
-        alpha: 0.6,
-        state: "DASH"
+        state: this.state,
+        animTimer: this.animTimer,
+        alpha: 0.6
       });
-
       if (this.dashTimer <= 0) {
-        this.isDashing = false;
+        this.vx = 0;
+        this.state = "IDLE";
       }
     }
 
-    // Decay dash trail
-    for (let i = this.dashTrail.length - 1; i >= 0; i--) {
-      this.dashTrail[i].alpha -= dt * 3.5;
-      if (this.dashTrail[i].alpha <= 0) {
-        this.dashTrail.splice(i, 1);
+    // Update Ghost Trails
+    for (let i = this.ghostTrails.length - 1; i >= 0; i--) {
+      this.ghostTrails[i].alpha -= dt * 3.5;
+      if (this.ghostTrails[i].alpha <= 0) {
+        this.ghostTrails.splice(i, 1);
       }
     }
 
-    // Attack State
-    if (this.isAttacking) {
-      this.attackTimer += dt;
-      if (this.attackTimer >= this.attackDuration) {
-        this.isAttacking = false;
+    // Attack State Lifecycle
+    if (this.attackTimer > 0) {
+      this.attackTimer -= dt;
+      if (this.attackTimer <= 0) {
+        this.state = this.isGrounded ? "IDLE" : (this.vy > 0 ? "FALL" : "JUMP");
       }
     }
 
-    // Apply Physics
-    Physics.updateBody(this, dt, groundY);
+    // Physics Update
+    if (this.dashTimer <= 0) {
+      Physics.applyGravity(this, dt);
+      Physics.applyFriction(this, this.isGrounded ? 0.88 : 0.98);
+    }
+    Physics.updatePosition(this, dt);
+    Physics.checkGround(this, groundY);
 
-    // Determine Animation State
-    if (this.hurtTimer > 0) {
-      this.animState = "HURT";
-    } else if (this.isDashing) {
-      this.animState = "DASH";
-    } else if (this.isAttacking) {
-      this.animState = `SLASH_${this.attackPhase}`;
-    } else if (!this.isGrounded) {
-      this.animState = this.vy < 0 ? "JUMP" : "FALL";
-    } else if (Math.abs(this.vx) > 30) {
-      this.animState = "RUN";
-    } else {
-      this.animState = "IDLE";
+    // Dynamic State Resolution if not attacking or dashing
+    if (this.attackTimer <= 0 && this.dashTimer <= 0 && this.hitStunTimer <= 0) {
+      if (!this.isGrounded) {
+        this.state = this.vy > 0 ? "FALL" : "JUMP";
+      } else if (Math.abs(this.vx) > 30) {
+        this.state = "RUN";
+      } else {
+        this.state = "IDLE";
+      }
     }
   }
 
   getAttackHitbox() {
-    if (!this.isAttacking || this.hasHitThisAttack) return null;
+    if (this.attackTimer <= 0 || this.hasHitThisAttack) return null;
 
-    const reach = this.attackPhase === 3 ? 75 : 60;
-    const height = 54;
-    const x = this.facing === "right" ? this.x : this.x - reach;
-    const y = this.y - this.height * 0.85;
+    const reach = this.attackPhase === 3 ? 95 : 75;
+    const hitboxWidth = reach;
+    const hitboxHeight = 70;
+
+    const isCrit = Math.random() < this.critChance;
+    const damageMultiplier = this.attackPhase === 3 ? 2.2 : (this.attackPhase === 2 ? 1.4 : 1.0);
+    const totalDamage = this.baseDamage * damageMultiplier * (isCrit ? 1.8 : 1.0);
 
     return {
-      x,
-      y,
-      width: reach,
-      height,
-      damage: this.baseDamage * (this.attackPhase === 3 ? 1.8 : this.attackPhase === 2 ? 1.3 : 1.0),
-      isCrit: Math.random() < this.critChance,
-      facing: this.facing
+      x: this.facing === "right" ? this.x + 5 : this.x - hitboxWidth - 5,
+      y: this.y - this.height + 5,
+      width: hitboxWidth,
+      height: hitboxHeight,
+      damage: totalDamage,
+      isCrit
     };
   }
 
-  takeDamage(amount, fromX = 0, uiManager = null, particles = null) {
-    if (this.invulnerableTimer > 0 || this.isDead) return false;
-
-    this.health = Math.max(0, this.health - amount);
-    this.hurtTimer = 0.25;
-    this.invulnerableTimer = 0.6; // Brief mercy invulnerability
-
-    // Knockback
-    const knockDir = this.x > fromX ? 1 : -1;
-    Physics.applyKnockback(this, knockDir, 280, -200);
-
-    AudioFX.playPlayerHurt();
-
-    if (uiManager) {
-      uiManager.addDamageText(this.x, this.y - 30, Math.ceil(amount), false, true);
-      uiManager.triggerShake(9, 0.28);
-    }
-
-    if (particles) {
-      particles.emitDemonBlood(this.x, this.y - 30, this.facing);
-    }
-
-    if (this.health <= 0) {
-      this.isDead = true;
-      AudioFX.playDefeat();
-    }
-
-    return true;
-  }
-
   draw(ctx) {
-    // Draw Dash Ghost Trail
-    for (const ghost of this.dashTrail) {
+    if (this.isDead) return;
+
+    // 1. Draw Ghost Dash Clones
+    for (const trail of this.ghostTrails) {
       Animations.drawStickman(ctx, {
-        x: ghost.x,
-        y: ghost.y,
-        facing: ghost.facing,
-        state: ghost.state,
-        animTimer: this.animTimer,
-        color: "#a855f7",
-        bladeColor: "#c084fc",
-        alpha: ghost.alpha
+        x: trail.x,
+        y: trail.y,
+        facing: trail.facing,
+        state: trail.state,
+        animTimer: trail.animTimer,
+        color: "#06b6d4",
+        accentColor: "#22d3ee",
+        bladeColor: "#06b6d4",
+        alpha: trail.alpha * 0.4
       });
     }
 
-    // Invulnerability Blink
-    if (this.invulnerableTimer > 0 && Math.floor(this.invulnerableTimer * 20) % 2 === 0) {
-      // Skip draw frame for flicker
-      return;
+    // 2. Invulnerability Flickering
+    let heroAlpha = 1.0;
+    if (this.invulnerableTimer > 0) {
+      heroAlpha = Math.sin(this.animTimer * 28) > 0 ? 0.4 : 0.95;
     }
 
-    // Draw Main Stickman
+    // 3. Draw Authentic Black Stickman Hero
     Animations.drawStickman(ctx, {
       x: this.x,
       y: this.y,
       facing: this.facing,
-      state: this.animState,
+      state: this.state,
       animTimer: this.animTimer,
       combo: this.attackPhase,
-      color: "#06b6d4",
+      color: "#050505",
+      accentColor: "#06b6d4",
       bladeColor: "#22d3ee",
-      alpha: 1.0
+      alpha: heroAlpha,
+      isInvulnerable: this.invulnerableTimer > 0
     });
+
+    // 4. Respawn Shield Visual Ring
+    if (this.invulnerableTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = "#22d3ee";
+      ctx.shadowColor = "#22d3ee";
+      ctx.shadowBlur = 15;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(this.x, this.y - 34, 28, 44, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 }

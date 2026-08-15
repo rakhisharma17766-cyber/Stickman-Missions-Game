@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { PlayerProfile } from '../state/PlayerProfile';
 import { ALL_LEVELS } from '../levels/LevelRegistry';
 import { AudioFX } from '../utils/AudioFX';
-import { ArrowLeft, Lock, Trophy, Skull, Play, Zap, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Lock, Trophy, Skull, Play, Zap, Volume2, VolumeX } from 'lucide-react';
 
 export function LevelSelectScreen({ onBack, onStartLevel }) {
   const [profile, setProfile] = useState(PlayerProfile.getProfile());
+  const [soundEnabled, setSoundEnabled] = useState(profile.audioEnabled !== false);
 
   useEffect(() => {
     const unsubscribe = PlayerProfile.subscribe((updated) => {
@@ -13,6 +14,24 @@ export function LevelSelectScreen({ onBack, onStartLevel }) {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (soundEnabled) {
+      AudioFX.playBGM("MENU");
+    }
+  }, [soundEnabled]);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    AudioFX.setMuted(!next);
+    PlayerProfile.setAudioEnabled(next);
+    if (next) {
+      AudioFX.playBGM("MENU");
+    } else {
+      AudioFX.stopBGM();
+    }
+  };
 
   const handleLevelClick = (level) => {
     const isUnlocked = profile.unlockedLevels.includes(level.id);
@@ -38,7 +57,7 @@ export function LevelSelectScreen({ onBack, onStartLevel }) {
         <button
           id="level-select-back-btn"
           onClick={() => {
-            AudioFX.playSlash(1);
+            AudioFX.playUIClick();
             onBack();
           }}
           className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold uppercase transition-all shadow-md active:scale-95"
@@ -56,7 +75,7 @@ export function LevelSelectScreen({ onBack, onStartLevel }) {
           </p>
         </div>
 
-        {/* Currency Counters */}
+        {/* Currency Counters & Audio Toggle */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2.5 bg-black/50 border border-white/10 rounded-full pl-1.5 pr-4 py-1.5 backdrop-blur-md">
             <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center text-black font-black text-xs shadow-[0_0_8px_rgba(234,179,8,0.4)]">
@@ -74,6 +93,15 @@ export function LevelSelectScreen({ onBack, onStartLevel }) {
               {profile.totalDiamonds.toLocaleString()}
             </span>
           </div>
+
+          <button
+            id="level-select-sound-btn"
+            onClick={toggleSound}
+            className="p-2 rounded-full bg-white/5 border border-white/10 text-gray-300 hover:text-white transition-all active:scale-95"
+            title="Toggle Audio"
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4 text-gray-500" />}
+          </button>
         </div>
       </header>
 
@@ -202,10 +230,9 @@ export function LevelSelectScreen({ onBack, onStartLevel }) {
       {/* FOOTER */}
       <footer className="relative z-10 w-full max-w-6xl mx-auto text-center py-4">
         <p className="text-xs text-gray-500 font-semibold tracking-wider uppercase">
-          Enhance Katana Sharpness and Armor in the Hunter Dojo before attempting Boss Arenas
+          Enhance Katana Sharpness, Armor, and Agility in the Hunter Dojo before attempting Boss Arenas
         </p>
       </footer>
     </div>
   );
 }
-

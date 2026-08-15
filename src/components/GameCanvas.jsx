@@ -11,7 +11,7 @@ import { PlayerProfile } from '../state/PlayerProfile';
 import { getLevelById } from '../levels/LevelRegistry';
 import { 
   ArrowLeft, RotateCcw, Play, Pause, Volume2, VolumeX, 
-  Trophy, Skull, Zap, ChevronRight, Swords 
+  Trophy, Skull, Zap, ChevronRight, Swords, Smartphone
 } from 'lucide-react';
 
 export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
@@ -27,12 +27,14 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
     score: 0,
     coinsEarned: 0,
     diamondsEarned: 0,
-    maxCombo: 0
+    maxCombo: 0,
+    remainingLives: 3
   });
   const [audioMuted, setAudioMuted] = useState(!PlayerProfile.getProfile().audioEnabled);
 
-  // Touch Virtual Controls State
+  // Touch Virtual Controls State & Landscape Check
   const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
 
   // Engine references kept outside React renders
   const engineRef = useRef({
@@ -57,15 +59,32 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
     endlessSpawnTimer: 0
   });
 
-  // Detect Touch / Mobile Screen
+  // Detect Touch & Screen Orientation
   useEffect(() => {
-    const checkTouch = () => {
-      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024);
+    const checkViewport = () => {
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
+      setIsTouchDevice(isTouch);
+      setIsPortrait(window.innerHeight > window.innerWidth && window.innerWidth < 768);
     };
-    checkTouch();
-    window.addEventListener('resize', checkTouch);
-    return () => window.removeEventListener('resize', checkTouch);
+    checkViewport();
+    window.addEventListener('resize', checkViewport);
+    window.addEventListener('orientationchange', checkViewport);
+    return () => {
+      window.removeEventListener('resize', checkViewport);
+      window.removeEventListener('orientationchange', checkViewport);
+    };
   }, []);
+
+  // Play Level-specific BGM
+  useEffect(() => {
+    AudioFX.ensureContext();
+    const track = levelId === 3 ? 'LEVEL3' : levelId === 2 ? 'LEVEL2' : 'LEVEL1';
+    AudioFX.playBGM(track);
+
+    return () => {
+      AudioFX.stopBGM();
+    };
+  }, [levelId]);
 
   // Keyboard Event Listeners
   useEffect(() => {
@@ -122,6 +141,10 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
     setAudioMuted(nextMuted);
     AudioFX.setMuted(nextMuted);
     PlayerProfile.setAudioEnabled(!nextMuted);
+    if (!nextMuted) {
+      const track = levelId === 3 ? 'LEVEL3' : levelId === 2 ? 'LEVEL2' : 'LEVEL1';
+      AudioFX.playBGM(track);
+    }
   };
 
   // Spawn dynamic enemy helper
@@ -215,7 +238,7 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
         eng.enemies.length < 3
       ) {
         eng.endlessSpawnTimer += dt;
-        if (eng.endlessSpawnTimer >= 3.0) {
+        if (eng.endlessSpawnTimer >= 2.8) {
           eng.endlessSpawnTimer = 0;
           const enemyType = Math.random() > 0.4 ? 'GroundBrute' : 'FlyingGargoyle';
           spawnEnemy(enemyType, 'both');
@@ -250,9 +273,9 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
             // Increment Combo
             eng.player.comboCount++;
             eng.player.comboTimer = eng.player.comboMaxWindow;
-            eng.score += (attackHitbox.isCrit ? 150 : 80) * Math.min(5, eng.player.comboCount);
+            eng.score += (attackHitbox.isCrit ? 160 : 90) * Math.min(5, eng.player.comboCount);
 
-            // Demon Soul Life-Steal (Demon Hunter ability)
+            // Demon Soul Life-Steal
             if (eng.player.health < eng.player.maxHealth) {
               eng.player.health = Math.min(eng.player.maxHealth, eng.player.health + 1.2);
             }
@@ -324,7 +347,8 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
           score: eng.score,
           coinsEarned,
           diamondsEarned,
-          maxCombo: eng.maxCombo
+          maxCombo: eng.maxCombo,
+          remainingLives: eng.player.lives
         });
 
         setTimeout(() => {
@@ -333,7 +357,7 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
         }, 1200);
       }
 
-      // 7. Check Player Defeat
+      // 7. Check Player Defeat (When all 3 lives are exhausted)
       if (eng.player.isDead && !eng.isComplete) {
         eng.isComplete = true;
         setGameStats({
@@ -341,7 +365,8 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
           score: eng.score,
           coinsEarned: Math.floor(eng.score * 0.05),
           diamondsEarned: 0,
-          maxCombo: eng.maxCombo
+          maxCombo: eng.maxCombo,
+          remainingLives: 0
         });
         setTimeout(() => {
           eng.loop?.pause();
@@ -374,7 +399,7 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
       // 4. Draw Particle System
       eng.particles.draw(ctx);
 
-      // 5. Draw Canvas In-Game HUD
+      // 5. Draw Canvas In-Game HUD (Health, 3 Lives, Mission Goals)
       eng.uiManager.draw(ctx, {
         player: eng.player,
         levelConfig,
@@ -426,18 +451,26 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-screen bg-black overflow-hidden select-none touch-none"
+      className="relative w-full h-full min-h-screen bg-black overflow-hidden select-none touch-none flex flex-col justify-between"
     >
       {/* 2D Canvas Target */}
-      <canvas ref={canvasRef} className="block w-full h-full" />
+      <canvas ref={canvasRef} className="block w-full h-full absolute inset-0 z-0" />
 
-      {/* Top Floating Mini Controls (Pause & Sound) */}
-      <div className="absolute top-4 right-4 z-30 flex items-center gap-2">
+      {/* Landscape Reminder for Mobile in Portrait */}
+      {isPortrait && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-black/80 border border-cyan-500/50 rounded-full px-4 py-1.5 flex items-center gap-2 text-cyan-300 text-xs backdrop-blur-md animate-pulse">
+          <Smartphone className="w-4 h-4 rotate-90" />
+          <span>Rotate phone to landscape for optimal stickman combat!</span>
+        </div>
+      )}
+
+      {/* Top Floating Mini Controls (Back to Map, Sound, Pause) */}
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-2.5">
         <button
           id="canvas-sound-btn"
           onClick={toggleSound}
-          className="p-2 sm:p-2.5 rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md shadow-lg transition-all"
-          title="Toggle Sound"
+          className="p-2 sm:p-2.5 rounded-xl bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md shadow-lg transition-all active:scale-95"
+          title="Toggle Sound & Music"
         >
           {audioMuted ? <VolumeX className="w-4 h-4 text-gray-500" /> : <Volume2 className="w-4 h-4 text-cyan-400" />}
         </button>
@@ -445,10 +478,23 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
         <button
           id="canvas-pause-btn"
           onClick={togglePause}
-          className="p-2 sm:p-2.5 rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md shadow-lg transition-all"
+          className="p-2 sm:p-2.5 rounded-xl bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md shadow-lg transition-all active:scale-95"
           title="Pause Game"
         >
           {gameState === 'PAUSED' ? <Play className="w-4 h-4 text-emerald-400" /> : <Pause className="w-4 h-4 text-cyan-400" />}
+        </button>
+
+        <button
+          id="canvas-back-map-btn"
+          onClick={() => {
+            AudioFX.playUIClick();
+            onReturnToMenu();
+          }}
+          className="p-2 sm:p-2.5 rounded-xl bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md shadow-lg transition-all active:scale-95 flex items-center gap-1.5 px-3"
+          title="Return to Sector Select"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-[11px] font-bold uppercase hidden sm:inline">Sectors</span>
         </button>
       </div>
 
@@ -460,7 +506,7 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
             <h2 className="text-2xl font-black uppercase text-white mb-1 font-mono tracking-tight">
               MISSION PAUSED
             </h2>
-            <p className="text-xs text-gray-400 mb-6">Stage {levelConfig.id}: {levelConfig.title}</p>
+            <p className="text-xs text-gray-400 mb-6">Sector {levelConfig.id}: {levelConfig.title}</p>
 
             <div className="space-y-3">
               <button
@@ -477,7 +523,7 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
                 onClick={() => {
                   window.location.reload();
                 }}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>Restart Sector</span>
@@ -486,10 +532,10 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
               <button
                 id="pause-menu-btn"
                 onClick={onReturnToMenu}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Return to Headquarters</span>
+                <span>Return to Sector Map</span>
               </button>
             </div>
           </div>
@@ -500,7 +546,6 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
       {gameState === 'VICTORY' && (
         <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-black/85 backdrop-blur-lg animate-fadeIn font-sans">
           <div className="relative w-full max-w-md p-6 sm:p-8 rounded-3xl bg-[#080808]/95 border border-cyan-500/50 shadow-2xl text-center overflow-hidden">
-            {/* Ambient Cyan Aura */}
             <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-72 h-36 bg-cyan-500/15 blur-3xl pointer-events-none rounded-full" />
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-60" />
 
@@ -512,14 +557,14 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
               SECTOR CLEARED
             </h2>
             <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-6">
-              Sector {levelConfig.id} Cleansed of Demons
+              Sector {levelConfig.id} Cleansed of Demon Incursion
             </p>
 
             {/* Match Rewards Breakdown Card */}
             <div className="p-4 rounded-2xl bg-black/60 border border-white/10 mb-6 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-400 flex items-center gap-1.5">
-                  <Skull className="w-3.5 h-3.5 text-rose-400" /> Demons Banished
+                  <Skull className="w-3.5 h-3.5 text-rose-400" /> Demons Slayed
                 </span>
                 <span className="font-bold text-white font-mono">{gameStats.kills}</span>
               </div>
@@ -570,17 +615,17 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
                 </button>
               ) : (
                 <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold text-xs">
-                  🏆 All Demon Incursion Sectors Cleared! You are the Supreme Demon Hunter!
+                  🏆 All Demon Incursion Sectors Cleared! Supreme Demon Hunter!
                 </div>
               )}
 
               <button
                 id="victory-menu-btn"
                 onClick={onReturnToMenu}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Return to Headquarters</span>
+                <span>Return to Sector Map</span>
               </button>
             </div>
           </div>
@@ -597,10 +642,10 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
             </div>
 
             <h2 className="text-3xl sm:text-4xl font-black uppercase text-white mb-1 font-mono tracking-tight">
-              DEMON OVERRUN
+              ALL LIVES LOST
             </h2>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">
-              Mortal vessel collapsed under Nether pressure
+              Vessel collapsed — Return to Dojo for Katana & Armor Upgrades
             </p>
 
             <div className="p-4 rounded-2xl bg-black/60 border border-white/10 mb-6 space-y-2 text-xs">
@@ -623,16 +668,16 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(244,63,94,0.3)] active:scale-95 transition-all"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>Retry Mission</span>
+                <span>Retry Sector</span>
               </button>
 
               <button
                 id="defeat-menu-btn"
                 onClick={onReturnToMenu}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Upgrade in Hunter Dojo</span>
+                <span>Return to Sector Map</span>
               </button>
             </div>
           </div>
@@ -641,41 +686,41 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
 
       {/* MOBILE / TOUCH SCREEN VIRTUAL CONTROLS */}
       {isTouchDevice && (
-        <div className="absolute inset-x-0 bottom-6 z-20 pointer-events-none px-6 flex items-end justify-between select-none">
+        <div className="absolute inset-x-0 bottom-4 z-20 pointer-events-none px-4 sm:px-8 flex items-end justify-between select-none">
           {/* Left D-Pad (Move Left / Right) */}
           <div className="pointer-events-auto flex items-center gap-3">
             <button
               id="touch-left-btn"
-              onTouchStart={() => handleTouchStart('left')}
-              onTouchEnd={() => handleTouchEnd('left')}
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('left'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('left'); }}
               onMouseDown={() => handleTouchStart('left')}
               onMouseUp={() => handleTouchEnd('left')}
-              className="w-16 h-16 rounded-2xl bg-black/60 active:bg-cyan-500/30 border border-white/15 active:border-cyan-400 backdrop-blur-md flex items-center justify-center text-cyan-400 font-black text-xl active:scale-95 shadow-xl transition-all"
+              className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-black/75 active:bg-cyan-500/30 border-2 border-white/20 active:border-cyan-400 backdrop-blur-lg flex items-center justify-center text-cyan-400 font-black text-2xl active:scale-95 shadow-2xl transition-all"
             >
               ◀
             </button>
             <button
               id="touch-right-btn"
-              onTouchStart={() => handleTouchStart('right')}
-              onTouchEnd={() => handleTouchEnd('right')}
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('right'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('right'); }}
               onMouseDown={() => handleTouchStart('right')}
               onMouseUp={() => handleTouchEnd('right')}
-              className="w-16 h-16 rounded-2xl bg-black/60 active:bg-cyan-500/30 border border-white/15 active:border-cyan-400 backdrop-blur-md flex items-center justify-center text-cyan-400 font-black text-xl active:scale-95 shadow-xl transition-all"
+              className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-black/75 active:bg-cyan-500/30 border-2 border-white/20 active:border-cyan-400 backdrop-blur-lg flex items-center justify-center text-cyan-400 font-black text-2xl active:scale-95 shadow-2xl transition-all"
             >
               ▶
             </button>
           </div>
 
-          {/* Right Action Cluster (Jump, Slash, Dash) */}
+          {/* Right Action Cluster (Jump, Dash, Slash) */}
           <div className="pointer-events-auto flex items-center gap-3">
             {/* Dash Button */}
             <button
               id="touch-dash-btn"
-              onTouchStart={() => handleTouchStart('dash')}
-              onTouchEnd={() => handleTouchEnd('dash')}
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('dash'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('dash'); }}
               onMouseDown={() => handleTouchStart('dash')}
               onMouseUp={() => handleTouchEnd('dash')}
-              className="w-14 h-14 rounded-2xl bg-black/60 active:bg-cyan-500/30 border border-white/15 active:border-cyan-400 backdrop-blur-md flex flex-col items-center justify-center text-cyan-400 active:scale-95 shadow-xl transition-all"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/75 active:bg-cyan-500/30 border border-white/20 active:border-cyan-400 backdrop-blur-lg flex flex-col items-center justify-center text-cyan-400 active:scale-95 shadow-2xl transition-all"
             >
               <Zap className="w-5 h-5 text-cyan-400" />
               <span className="text-[9px] font-black uppercase">DASH</span>
@@ -684,26 +729,26 @@ export function GameCanvas({ levelId, onReturnToMenu, onNextLevel }) {
             {/* Jump Button */}
             <button
               id="touch-jump-btn"
-              onTouchStart={() => handleTouchStart('jump')}
-              onTouchEnd={() => handleTouchEnd('jump')}
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('jump'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('jump'); }}
               onMouseDown={() => handleTouchStart('jump')}
               onMouseUp={() => handleTouchEnd('jump')}
-              className="w-14 h-14 rounded-2xl bg-black/60 active:bg-cyan-500/30 border border-white/15 active:border-cyan-400 backdrop-blur-md flex flex-col items-center justify-center text-cyan-400 active:scale-95 shadow-xl transition-all"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/75 active:bg-cyan-500/30 border border-white/20 active:border-cyan-400 backdrop-blur-lg flex flex-col items-center justify-center text-cyan-400 active:scale-95 shadow-2xl transition-all"
             >
               <span className="text-base font-black">▲</span>
               <span className="text-[9px] font-black uppercase">JUMP</span>
             </button>
 
-            {/* Katana Attack Button (Glowing Cyan Button) */}
+            {/* Katana Attack Button (Large Glowing Cyan Button) */}
             <button
               id="touch-attack-btn"
-              onTouchStart={() => handleTouchStart('attack')}
-              onTouchEnd={() => handleTouchEnd('attack')}
+              onTouchStart={(e) => { e.preventDefault(); handleTouchStart('attack'); }}
+              onTouchEnd={(e) => { e.preventDefault(); handleTouchEnd('attack'); }}
               onMouseDown={() => handleTouchStart('attack')}
               onMouseUp={() => handleTouchEnd('attack')}
-              className="w-20 h-20 rounded-3xl bg-cyan-500 active:bg-cyan-400 border-2 border-cyan-300 text-black shadow-[0_0_30px_rgba(6,182,212,0.4)] flex flex-col items-center justify-center active:scale-95 transition-all"
+              className="w-20 h-20 sm:w-22 sm:h-22 rounded-3xl bg-cyan-500 active:bg-cyan-400 border-2 border-cyan-300 text-black shadow-[0_0_30px_rgba(6,182,212,0.4)] flex flex-col items-center justify-center active:scale-95 transition-all"
             >
-              <Swords className="w-7 h-7 text-black" />
+              <Swords className="w-7 h-7 sm:w-8 sm:h-8 text-black" />
               <span className="text-[10px] font-black uppercase tracking-wider text-black">SLASH</span>
             </button>
           </div>

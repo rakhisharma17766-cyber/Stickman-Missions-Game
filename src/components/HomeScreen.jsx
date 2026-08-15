@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PlayerProfile } from '../state/PlayerProfile';
 import { AudioFX } from '../utils/AudioFX';
 import { DojoModal } from './DojoModal';
-import { Shield, Volume2, VolumeX, Sparkles, Swords, Zap, Crosshair, ChevronRight } from 'lucide-react';
+import { Shield, Volume2, VolumeX, Swords, Zap, ChevronRight, Smartphone } from 'lucide-react';
 
 export function HomeScreen({ onStartGame, onSelectLevels }) {
   const [profile, setProfile] = useState(PlayerProfile.getProfile());
@@ -16,12 +16,24 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
     return unsubscribe;
   }, []);
 
+  // Start Ambient Menu Music on mount
+  useEffect(() => {
+    if (soundEnabled) {
+      AudioFX.playBGM("MENU");
+    }
+  }, [soundEnabled]);
+
   const toggleSound = () => {
     const next = !soundEnabled;
     setSoundEnabled(next);
     AudioFX.setMuted(!next);
     PlayerProfile.setAudioEnabled(next);
-    if (next) AudioFX.playSlash(1);
+    if (next) {
+      AudioFX.playSlash(1);
+      AudioFX.playBGM("MENU");
+    } else {
+      AudioFX.stopBGM();
+    }
   };
 
   const handlePlayClick = () => {
@@ -34,7 +46,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
   const levelProgress = Math.min(100, (((profile.stats?.totalKills || 0) % 5) / 5) * 100);
 
   return (
-    <div className="relative w-full h-full min-h-screen bg-[#050505] text-gray-100 font-sans overflow-hidden flex flex-col justify-between select-none">
+    <div className="relative w-full h-full min-h-screen bg-[#050505] text-gray-100 font-sans overflow-y-auto flex flex-col justify-between select-none">
       {/* Background Matrix & Subtle Gradient Mesh */}
       <div className="absolute inset-0 opacity-20 bg-dot-grid pointer-events-none" />
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#050505]/60 to-[#050505] pointer-events-none" />
@@ -93,7 +105,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
             id="open-dojo-btn"
             onClick={() => {
               AudioFX.ensureContext();
-              AudioFX.playSlash(1);
+              AudioFX.playUIClick();
               setIsDojoOpen(true);
             }}
             className="p-2 sm:p-2.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-cyan-400 hover:text-white transition-all shadow-md active:scale-95 flex items-center gap-2 px-3 sm:px-4"
@@ -109,7 +121,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
           <button
             id="sound-toggle-btn"
             onClick={toggleSound}
-            className="p-2 sm:p-2.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-gray-300 hover:text-white transition-all"
+            className="p-2 sm:p-2.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-gray-300 hover:text-white transition-all active:scale-95"
             title={soundEnabled ? "Mute Audio" : "Unmute Audio"}
           >
             {soundEnabled ? (
@@ -158,7 +170,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
               id="open-arsenal-btn"
               onClick={() => {
                 AudioFX.ensureContext();
-                AudioFX.playSlash(1);
+                AudioFX.playUIClick();
                 setIsDojoOpen(true);
               }}
               className="bg-white/5 border border-white/10 hover:bg-white/10 hover:border-cyan-500/40 py-3.5 sm:py-4 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-95"
@@ -173,7 +185,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
               className="bg-white/5 border border-white/10 hover:bg-white/10 hover:border-cyan-500/40 py-3.5 sm:py-4 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-95"
             >
               <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Trials</span>
-              <span className="text-xs sm:text-sm font-bold uppercase text-gray-200">Arena</span>
+              <span className="text-xs sm:text-sm font-bold uppercase text-gray-200">Sectors</span>
             </button>
           </div>
         </div>
@@ -181,7 +193,6 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
         {/* Ambient Stickman Demon Hunter Silhouette Art */}
         <div className="hidden lg:flex absolute right-12 xl:right-24 bottom-12 w-80 xl:w-96 h-[420px] items-center justify-center pointer-events-none">
           <svg className="w-full h-full opacity-40 drop-shadow-[0_0_30px_rgba(34,211,238,0.4)]" viewBox="0 0 100 100">
-            {/* Stickman Body & Limbs in Cyan */}
             <path
               d="M50 10 L50 85 M50 28 L28 48 M50 28 L72 48 M50 58 L28 88 M50 58 L72 88"
               stroke="#22d3ee"
@@ -189,9 +200,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
               fill="none"
               strokeLinecap="round"
             />
-            {/* Stickman Head */}
             <circle cx="50" cy="18" r="7.5" stroke="#22d3ee" strokeWidth="2.5" fill="none" />
-            {/* Demon Katana Blade in Crimson Glow */}
             <path
               d="M72 48 L90 25 L84 55 Z"
               fill="#f43f5e"
@@ -201,7 +210,7 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
         </div>
       </main>
 
-      {/* FOOTER: Daily Mission Box & Build Info */}
+      {/* FOOTER: Daily Mission Box & Mobile Landscape Tip */}
       <footer className="relative z-10 p-4 sm:p-8 flex flex-wrap justify-between items-end gap-4">
         {/* Daily Mission Card */}
         <div className="flex gap-4">
@@ -220,9 +229,9 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
 
         {/* Engine and Build Tags */}
         <div className="flex items-center gap-4 sm:gap-8 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-widest">
-          <span className="text-cyan-400">Build 0.4.2-α</span>
+          <span className="text-cyan-400">Build 0.4.5-α</span>
           <span className="hidden sm:inline">Engine: Blade-2D</span>
-          <span className="bg-white/10 text-white px-2.5 py-1 rounded">v1.2.0-Production</span>
+          <span className="bg-white/10 text-white px-2.5 py-1 rounded">3-Lives Respawn Engine</span>
         </div>
       </footer>
 
@@ -231,4 +240,3 @@ export function HomeScreen({ onStartGame, onSelectLevels }) {
     </div>
   );
 }
-

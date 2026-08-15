@@ -1,0 +1,6 @@
+{
+  "name": "Stickman Demon Hunter",
+  "description": "A high-octane 2D action canvas game featuring fluid stickman combat, demon hunter abilities, dynamic physics, particle systems, and progression economy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

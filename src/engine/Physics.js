@@ -13,12 +13,57 @@ export const PhysicsConfig = {
 
 export class Physics {
   /**
-   * Updates an entity's position, applying gravity and velocities
+   * Applies downward gravity acceleration
+   */
+  static applyGravity(body, dt) {
+    if (body.isFlying || body.isDashing || body.isStatic) return;
+    body.vy += PhysicsConfig.GRAVITY * dt;
+    if (body.vy > PhysicsConfig.MAX_FALL_SPEED) {
+      body.vy = PhysicsConfig.MAX_FALL_SPEED;
+    }
+  }
+
+  /**
+   * Applies surface friction or air resistance to horizontal velocity
+   */
+  static applyFriction(body, frictionMultiplier = 0.88) {
+    body.vx *= frictionMultiplier;
+    if (Math.abs(body.vx) < 2) {
+      body.vx = 0;
+    }
+  }
+
+  /**
+   * Integrates velocity into coordinate position
+   */
+  static updatePosition(body, dt) {
+    body.x += body.vx * dt;
+    body.y += body.vy * dt;
+  }
+
+  /**
+   * Resolves ground collision where body.y is the feet position
+   */
+  static checkGround(body, groundY) {
+    if (body.isFlying) {
+      body.isGrounded = false;
+      return;
+    }
+    if (body.y >= groundY) {
+      body.y = groundY;
+      body.vy = 0;
+      body.isGrounded = true;
+    } else {
+      body.isGrounded = false;
+    }
+  }
+
+  /**
+   * Integrated update method for enemies
    */
   static updateBody(body, dt, groundY) {
     if (body.isStatic) return;
 
-    // Apply gravity if not grounded and not flying
     if (!body.isFlying && !body.isDashing) {
       body.vy += PhysicsConfig.GRAVITY * dt;
       if (body.vy > PhysicsConfig.MAX_FALL_SPEED) {
@@ -26,23 +71,17 @@ export class Physics {
       }
     }
 
-    // Apply friction/drag
-    if (body.isDashing) {
-      body.vx *= Math.pow(PhysicsConfig.DASH_DRAG, dt * 60);
-    } else if (body.isGrounded) {
+    if (body.isGrounded) {
       body.vx *= Math.pow(PhysicsConfig.GROUND_FRICTION, dt * 60);
-    } else {
+    } else if (!body.isFlying) {
       body.vx *= Math.pow(PhysicsConfig.AIR_RESISTANCE, dt * 60);
     }
 
-    // Integrate position
     body.x += body.vx * dt;
     body.y += body.vy * dt;
 
-    // Ground collision resolution
-    const entityBottom = body.y + (body.height || 0);
-    if (!body.isFlying && entityBottom >= groundY) {
-      body.y = groundY - (body.height || 0);
+    if (!body.isFlying && body.y >= groundY) {
+      body.y = groundY;
       body.vy = 0;
       body.isGrounded = true;
     } else if (!body.isFlying) {
@@ -67,10 +106,10 @@ export class Physics {
    */
   static checkAttackHit(attackBox, target) {
     const targetBox = {
-      x: target.x - target.width / 2,
-      y: target.y - target.height,
-      width: target.width,
-      height: target.height
+      x: target.x - (target.width || 32) / 2,
+      y: target.y - (target.height || 60),
+      width: target.width || 32,
+      height: target.height || 60
     };
     return this.checkAABB(attackBox, targetBox);
   }

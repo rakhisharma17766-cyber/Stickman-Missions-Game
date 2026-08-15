@@ -93,7 +93,9 @@ export class BaseEnemy {
 
     if (uiManager) {
       uiManager.addDamageText(this.x, this.y - this.height * 0.7, Math.ceil(amount), isCrit, false);
-      if (isCrit) uiManager.triggerShake(5, 0.15);
+      if (isCrit && typeof uiManager.triggerScreenShake === "function") {
+        uiManager.triggerScreenShake(6, 0.18);
+      }
     }
 
     if (particles) {
@@ -112,8 +114,8 @@ export class BaseEnemy {
     if (particles) {
       particles.emitSoulBurst(this.x, this.y - this.height * 0.5);
     }
-    if (uiManager) {
-      uiManager.addNotification(this.x, this.y - this.height, `+${this.coinDrop} COINS`, "#fbbf24");
+    if (uiManager && typeof uiManager.addFloatingText === "function") {
+      uiManager.addFloatingText(this.x, this.y - this.height, `+${this.coinDrop} COINS`, "#fbbf24", 16);
     }
   }
 

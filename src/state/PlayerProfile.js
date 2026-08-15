@@ -103,6 +103,25 @@ class PlayerProfileManager {
     return this.getProfile();
   }
 
+  recordKill(isBoss = false) {
+    this.profile.stats.totalKills = (this.profile.stats.totalKills || 0) + 1;
+    if (isBoss) {
+      this.profile.stats.bossesDefeated = (this.profile.stats.bossesDefeated || 0) + 1;
+    }
+    this.save();
+    return this.getProfile();
+  }
+
+  unlockLevel(levelId) {
+    const id = Number(levelId);
+    if (id && !this.profile.unlockedLevels.includes(id)) {
+      this.profile.unlockedLevels.push(id);
+      this.profile.unlockedLevels.sort((a, b) => a - b);
+      this.save();
+    }
+    return this.getProfile();
+  }
+
   unlockNextLevel(currentLevelId) {
     const nextId = Number(currentLevelId) + 1;
     if (!this.profile.unlockedLevels.includes(nextId)) {
